@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Forex Analysis & Evaluation</title>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; background: #f4f6f8; }
+    h1 { text-align: center; color: #333; }
+    .app { text-align: center; margin-bottom: 20px; }
+    .currency-tabs { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+    .tab { padding: 8px 15px; background: #007bff; color: white; border-radius: 5px; cursor: pointer; }
+    .tab.active { background: #0056b3; }
+    .add-btn { background: #28a745; color: white; border: none; padding: 10px 15px; border-radius: 5px; cursor: pointer; }
+    .container { display: none; background: white; padding: 15px; border-radius: 8px; box-shadow: 0px 2px 6px rgba(0,0,0,0.1); margin-bottom: 20px; }
+    .container.active { display: block; }
+    .section-title { margin-top: 20px; font-weight: bold; color: #007bff; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    table, th, td { border: 1px solid #ddd; }
+    th, td { padding: 8px; text-align: center; }
+    select { padding: 5px; }
+    .summary, .report { margin-top: 20px; padding: 10px; border-radius: 5px; background: #f8f9fa; font-weight: bold; }
+    .grade { font-size: 20px; margin-top: 10px; }
+    .btn { margin: 5px; padding: 8px 12px; border: none; border-radius: 5px; cursor: pointer; }
+    .save-btn { background: #ffc107; }
+    .download-btn { background: #17a2b8; color: white; }
+    .remove-btn { background: #dc3545; color: white; }
+  </style>
+</head>
+<body>
+  <h1>Forex Swing & Daily Trend Analysis</h1>
+  <div class="app">
+    <div class="currency-tabs"></div>
+    <button class="add-btn">+ ADD CURRENCY</button>
+  </div>
+
+  <script>
+    const weights = {
+      direction: 30, aoi: 10, rejection: 30, structure: 30,
+      psych: 6, ema: 15, hl_lh: 10, shift: 30, engulf: 30
+    };
+
+    let currencyCount = 0;
+
+    document.querySelector('.add-btn').addEventListener('click', () => {
+      const name = prompt("Enter currency pair (e.g., EURUSD):");
+      if (!name) return;
+      if (document.querySelector(`[data-currency='${name}']`)) {
+        alert("Currency already added!"); return;
+      }
+
+      currencyCount++;
+      const tabId = "currency" + currencyCount;
+
+      const tab = document.createElement('div');
+      tab.className = "tab";
+      tab.innerText = name;
+      tab.onclick = () => showCurrency(tabId, tab, name);
+      tab.setAttribute("data-tab", name);
+      document.querySelector('.currency-tabs').appendChild(tab);
+
+      const container = document.createElement('div');
+      container.className = "container";
+      container.id = tabId;
+      container.setAttribute("data-currency", name);
+      container.innerHTML = generateForm(name);
+      document.body.appendChild(container);
+
+      tab.click();
+    });
+
+    function showCurrency(id, tab, name) {
+      document.querySelectorAll('.container').forEach(c => c.classList.remove('active'));
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      const container = document.getElementById(id);
+      container.classList.add('active');
+      tab.classList.add('active');
+
+      // Load saved data if exists
+      const saved = JSON.parse(localStorage.getItem(name));
+      if (saved) {
+        restoreSelections(container, saved.report);
+        calculate(name, container.querySelector(".save-btn")); // auto-refresh on open
+      }
+    }
+
+    function generateForm(name) {
+      return `
+        <h2>${name} Analysis</h2>
+        <div class="section-title">Direction</div>
+        ${makeDirectionTable("direction", ["Weekly","Daily","4Hr"])}
+
+        <div class="section-title">Area of Interest</div>
+        ${makeYesNoTable("aoi", ["Weekly","Daily","4Hr"], Math.round(weights.aoi/3))}
+
+        <div class="section-title">Price Rejecting AOI</div>
+        ${makeYesNoTable("rejection", ["Weekly","Daily","4Hr"], Math.round(weights.rejection/3))}
+
+        <div class="section-title">Previous Structure Point</div>
+        ${makeYesNoTable("structure", ["Weekly","Daily","4Hr"], Math.round(weights.structure/3))}
+
+        <div class="section-title">Psychological Level</div>
+        ${makeYesNoTable("psych", ["Weekly","Daily","4Hr"], Math.round(weights.psych/3))}
+
+        <div class="section-title">EMA</div>
+        ${makeYesNoTable("ema", ["Weekly","Daily","4Hr"], Math.round(weights.ema/3))}
+
+        <div class="section-title">Higher Low / Lower High</div>
+        ${makeYesNoTable("hl_lh", ["4Hr"], weights.hl_lh)}
+
+        <div class="section-title">Shift of Structure</div>
+        ${makeYesNoTable("shift", ["2Hr","1Hr","30Min"], Math.round(weights.shift/3))}
+
+        <div class="section-title">Engulfing Candle</div>
+        ${makeYesNoTable("engulf", ["2Hr","1Hr","30Min"], Math.round(weights.engulf/3))}
+
+        <button class="btn save-btn" onclick="calculate('${name}', this)">Save & Calculate</button>
+        <button class="btn download-btn" onclick="downloadReport('${name}', this)">Download</button>
+        <button class="btn remove-btn" onclick="removeCurrency('${name}', this)">Remove Currency</button>
+        <div class="summary"></div>
+        <div class="report"></div>
+      `;
+    }
+
+    function makeDirectionTable(group, timeframes) {
+      let rows = timeframes.map(t => `
+        <tr>
+          <td>${t}</td>
+          <td><input type="radio" name="${group}-${t}" value="bullish"> Bullish</td>
+          <td><input type="radio" name="${group}-${t}" value="bearish"> Bearish</td>
+        </tr>
+      `).join('');
+      return `<table><tr><th>Timeframe</th><th>Bullish</th><th>Bearish</th></tr>${rows}</table>`;
+    }
+
+    function makeYesNoTable(group, timeframes, perc) {
+      let rows = timeframes.map(t => `
+        <tr>
+          <td>${t}</td>
+          <td>
+            <select data-group="${group}" data-weight="${perc}">
+              <option value="0">No</option>
+              <option value="1">Yes</option>
+            </select>
+          </td>
+        </tr>
+      `).join('');
+      return `<table><tr><th>Timeframe</th><th>Yes/No</th></tr>${rows}</table>`;
+    }
+
+    function calculate(currency, btn) {
+      let total = 0, report = [];
+      const container = btn.parentNode;
+
+      // Direction
+      const dirSelections = ["Weekly","Daily","4Hr"].map(tf => {
+        let val = container.querySelector(`input[name="direction-${tf}"]:checked`);
+        return val ? val.value : null;
+      });
+      const bullishCount = dirSelections.filter(v => v === "bullish").length;
+      const bearishCount = dirSelections.filter(v => v === "bearish").length;
+      let dirScore = 0;
+      if (bullishCount === 3 || bearishCount === 3) dirScore = 30;
+      else if (bullishCount === 2 || bearishCount === 2) dirScore = 20;
+      else if (bullishCount >= 1 || bearishCount >= 1) dirScore = 10;
+      total += dirScore;
+      report.push({section:"Direction", details: dirSelections.map((v,i)=>["Direction",["Weekly","Daily","4Hr"][i], v||"None"]).filter(r=>r), score: dirScore});
+
+      // Groups with total scores
+      ["aoi","rejection","structure","psych","ema","hl_lh","shift","engulf"].forEach(g => {
+        let groupEls = container.querySelectorAll(`select[data-group="${g}"]`);
+        let groupScore = 0;
+        let details = [];
+        groupEls.forEach((s,i) => {
+          if (s.value === "1") groupScore += parseInt(s.dataset.weight);
+          details.push([g.toUpperCase(), s.parentNode.parentNode.firstElementChild.innerText, s.value === "1" ? "Yes" : "No"]);
+        });
+        total += groupScore;
+        report.push({section:g.toUpperCase(), details, score: groupScore});
+      });
+
+      let grade = "F";
+      if (total >= 90) grade = "A";
+      else if (total >= 80) grade = "B";
+      else if (total >= 70) grade = "C";
+      else if (total >= 60) grade = "D";
+
+      container.querySelector(".summary").innerHTML = `
+        Total Score: ${Math.round(total)}% <br> Grade: <span class="grade">${grade}</span>
+      `;
+      container.querySelector(".report").innerHTML = "Report updated.";
+
+      // Overwrite saved data
+      localStorage.setItem(currency, JSON.stringify({score: Math.round(total), grade, report}));
+    }
+
+    function restoreSelections(container, report) {
+      report.forEach(r => {
+        if (r.section === "Direction") {
+          r.details.forEach(d => {
+            const tf = d[1];
+            const val = d[2];
+            if (val !== "None") {
+              const input = container.querySelector(`input[name="direction-${tf}"][value="${val}"]`);
+              if (input) input.checked = true;
+            }
+          });
+        } else {
+          r.details.forEach(d => {
+            const tf = d[1];
+            const val = d[2];
+            const select = Array.from(container.querySelectorAll(`select[data-group="${r.section.toLowerCase()}"]`))
+              .find(s => s.parentNode.parentNode.firstElementChild.innerText === tf);
+            if (select) select.value = (val === "Yes" ? "1" : "0");
+          });
+        }
+      });
+    }
+
+    function downloadReport(currency, btn) {
+      const data = JSON.parse(localStorage.getItem(currency));
+      if (!data) { alert("No saved report!"); return; }
+
+      let ws_data = [["Section","Timeframe","Selection","Score"]];
+      
+      data.report.forEach(r => {
+        if (r.details.length > 0) {
+          ws_data.push([r.section, r.details[0][1], r.details[0][2], ""]);
+          for (let i = 1; i < r.details.length; i++) {
+            ws_data.push(["", r.details[i][1], r.details[i][2], ""]);
+          }
+        }
+        ws_data.push([r.section, "TOTAL", "", r.score]);
+      });
+
+      ws_data.push([]);
+      ws_data.push(["Currency", currency]);
+      ws_data.push(["Total Score", data.score+"%"]);
+      ws_data.push(["Grade", data.grade]);
+
+      const ws = XLSX.utils.aoa_to_sheet(ws_data);
+
+      // Apply borders
+      const range = XLSX.utils.decode_range(ws['!ref']);
+      for (let R = range.s.r; R <= range.e.r; ++R) {
+        for (let C = range.s.c; C <= range.e.c; ++C) {
+          const cell_ref = XLSX.utils.encode_cell({r:R, c:C});
+          if (!ws[cell_ref]) continue;
+          if (!ws[cell_ref].s) ws[cell_ref].s = {};
+          ws[cell_ref].s.border = {
+            top: {style:"thin", color:{rgb:"000000"}},
+            bottom: {style:"thin", color:{rgb:"000000"}},
+            left: {style:"thin", color:{rgb:"000000"}},
+            right: {style:"thin", color:{rgb:"000000"}}
+          };
+        }
+      }
+
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Analysis");
+
+      XLSX.writeFile(wb, currency + "_analysis.xlsx", {cellStyles:true});
+    }
+
+    function removeCurrency(currency, btn) {
+      if (!confirm(`Are you sure you want to remove ${currency}?`)) return;
+
+      // Remove tab
+      document.querySelectorAll(".tab").forEach(tab => {
+        if (tab.getAttribute("data-tab") === currency) tab.remove();
+      });
+
+      // Remove container
+      const container = btn.parentNode;
+      container.remove();
+
+      // Remove from localStorage
+      localStorage.removeItem(currency);
+    }
+  </script>
+</body>
+</html>
